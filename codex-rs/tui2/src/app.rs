@@ -1501,6 +1501,9 @@ impl App {
                 }
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::ConversationHistory(ev) => {
+                self.on_conversation_history_for_backtrack(tui, ev).await?;
+            }
             AppEvent::OpenResumePicker => {
                 match crate::resume_picker::run_resume_picker(
                     tui,
@@ -2268,9 +2271,7 @@ impl App {
                 && self.backtrack.nth_user_message != usize::MAX
                 && self.chat_widget.composer_is_empty() =>
             {
-                if let Some(selection) = self.confirm_backtrack_from_main() {
-                    self.apply_backtrack_selection(tui, selection);
-                }
+                self.confirm_backtrack_from_main();
             }
             KeyEvent {
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
@@ -2641,7 +2642,7 @@ mod tests {
 
     #[tokio::test]
     async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
-        let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
 
         let user_cell = |text: &str| -> Arc<dyn HistoryCell> {
             Arc::new(UserHistoryCell {
@@ -2720,22 +2721,11 @@ mod tests {
         app.backtrack.primed = true;
         app.backtrack.nth_user_message = user_count(&app.transcript_cells).saturating_sub(1);
 
-        let selection = app
-            .confirm_backtrack_from_main()
-            .expect("backtrack selection");
-        assert_eq!(selection.nth_user_message, 1);
-        assert_eq!(selection.prefill, "follow-up (edited)");
+        app.confirm_backtrack_from_main();
 
-        app.apply_backtrack_rollback(selection);
-
-        let mut rollback_turns = None;
-        while let Ok(op) = op_rx.try_recv() {
-            if let Op::ThreadRollback { num_turns } = op {
-                rollback_turns = Some(num_turns);
-            }
-        }
-
-        assert_eq!(rollback_turns, Some(1));
+        let (_, nth, prefill) = app.backtrack.pending.clone().expect("pending backtrack");
+        assert_eq!(nth, 1);
+        assert_eq!(prefill.text, "follow-up (edited)");
     }
 
     #[tokio::test]
