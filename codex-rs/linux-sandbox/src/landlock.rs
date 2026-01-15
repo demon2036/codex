@@ -27,22 +27,31 @@ use seccompiler::SeccompRule;
 use seccompiler::TargetArch;
 use seccompiler::apply_filter;
 
+#[derive(Debug)]
+pub(crate) enum SandboxSetupError {
+    Namespaces(CodexErr),
+    NoNewPrivs(CodexErr),
+    Seccomp(CodexErr),
+    Landlock(CodexErr),
+}
+
 /// Apply sandbox policies inside this thread so only the child inherits
 /// them, not the entire CLI process.
 pub(crate) fn apply_sandbox_policy_to_current_thread(
     sandbox_policy: &SandboxPolicy,
     cwd: &Path,
-) -> Result<()> {
+) -> std::result::Result<(), SandboxSetupError> {
     if !sandbox_policy.has_full_disk_write_access() {
-        apply_read_only_mounts(sandbox_policy, cwd)?;
+        apply_read_only_mounts(sandbox_policy, cwd).map_err(SandboxSetupError::Namespaces)?;
     }
 
     if !sandbox_policy.has_full_disk_write_access() || !sandbox_policy.has_full_network_access() {
-        set_no_new_privs()?;
+        set_no_new_privs().map_err(SandboxSetupError::NoNewPrivs)?;
     }
 
     if !sandbox_policy.has_full_network_access() {
-        install_network_seccomp_filter_on_current_thread()?;
+        install_network_seccomp_filter_on_current_thread()
+            .map_err(|err| SandboxSetupError::Seccomp(CodexErr::from(err)))?;
     }
 
     if !sandbox_policy.has_full_disk_write_access() {
@@ -51,7 +60,8 @@ pub(crate) fn apply_sandbox_policy_to_current_thread(
             .into_iter()
             .map(|writable_root| writable_root.root)
             .collect();
-        install_filesystem_landlock_rules_on_current_thread(writable_roots)?;
+        install_filesystem_landlock_rules_on_current_thread(writable_roots)
+            .map_err(SandboxSetupError::Landlock)?;
     }
 
     // TODO(ragona): Add appropriate restrictions if
