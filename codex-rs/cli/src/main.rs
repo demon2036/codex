@@ -740,6 +740,13 @@ async fn run_interactive_tui(
     interactive: TuiCli,
     codex_linux_sandbox_exe: Option<PathBuf>,
 ) -> std::io::Result<AppExitInfo> {
+    if std::env::var("TERM").is_ok_and(|term| term == "dumb") {
+        eprintln!(
+            "ERROR: TERM is set to \"dumb\". Codex does not support running in that terminal. Please run in a supported terminal or unset TERM."
+        );
+        std::process::exit(1);
+    }
+
     if is_tui2_enabled(&interactive).await? {
         let result = tui2::run_main(interactive.into(), codex_linux_sandbox_exe).await?;
         Ok(result.into())
