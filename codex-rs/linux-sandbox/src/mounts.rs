@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::error::Error;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
