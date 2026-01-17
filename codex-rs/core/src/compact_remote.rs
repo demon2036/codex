@@ -55,6 +55,7 @@ async fn run_remote_compact_task_inner_impl(
         tools: vec![],
         parallel_tool_calls: false,
         base_instructions_override: turn_context.base_instructions.clone(),
+        personality: turn_context.personality.clone(),
         output_schema: None,
     };
 

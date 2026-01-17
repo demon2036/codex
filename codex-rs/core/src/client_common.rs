@@ -1,4 +1,5 @@
 use crate::client_common::tools::ToolSpec;
+use crate::config::types::Personality;
 use crate::error::Result;
 pub use codex_api::common::ResponseEvent;
 use codex_protocol::models::ResponseItem;
@@ -37,17 +38,36 @@ pub struct Prompt {
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
 
+    /// Optionally specify the personality of the model
+    pub personality: Option<Personality>,
+
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
 }
 
 impl Prompt {
     pub(crate) fn get_full_instructions<'a>(&'a self, model: &'a ModelInfo) -> Cow<'a, str> {
-        Cow::Borrowed(
-            self.base_instructions_override
-                .as_deref()
-                .unwrap_or(model.base_instructions.as_str()),
-        )
+        if model.slug.contains("gpt-5.2-codex")
+            && let Some(personality) = &self.personality
+        {
+            let template = include_str!(
+                "../templates/model_instructions/gpt-5.2-codex_instructions_template.md"
+            );
+            let personality_message = match personality {
+                Personality::Friendly => include_str!("../templates/personalities/friendly.md"),
+                Personality::Pragmatic => {
+                    include_str!("../templates/personalities/pragmatic.md")
+                }
+            };
+            let instructions = template.replace("{{ personality_message }}", personality_message);
+            Cow::Owned(instructions)
+        } else {
+            Cow::Borrowed(
+                self.base_instructions_override
+                    .as_deref()
+                    .unwrap_or(model.base_instructions.as_str()),
+            )
+        }
     }
 
     pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {

@@ -9,6 +9,7 @@ use crate::config::types::Notifications;
 use crate::config::types::OtelConfig;
 use crate::config::types::OtelConfigToml;
 use crate::config::types::OtelExporterKind;
+use crate::config::types::Personality;
 use crate::config::types::SandboxWorkspaceWrite;
 use crate::config::types::ScrollInputMode;
 use crate::config::types::ShellEnvironmentPolicy;
@@ -124,6 +125,9 @@ pub struct Config {
 
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
+
+    /// Optionally specify the personality of the model
+    pub model_personality: Option<Personality>,
 
     /// Approval policy for executing commands.
     pub approval_policy: Constrained<AskForApproval>,
@@ -901,6 +905,9 @@ pub struct ConfigToml {
     /// Override to force-enable reasoning summaries for the configured model.
     pub model_supports_reasoning_summaries: Option<bool>,
 
+    /// Optionally specify the personality of the model
+    pub model_personality: Option<Personality>,
+
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
@@ -1485,6 +1492,7 @@ impl Config {
             notify: cfg.notify,
             user_instructions,
             base_instructions,
+            model_personality: config_profile.model_personality.or(cfg.model_personality),
             developer_instructions,
             compact_prompt,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"
@@ -3616,6 +3624,7 @@ model_verbosity = "high"
                 model_reasoning_summary: ReasoningSummary::Detailed,
                 model_supports_reasoning_summaries: None,
                 model_verbosity: None,
+                model_personality: None,
                 chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
                 base_instructions: None,
                 developer_instructions: None,
@@ -3703,6 +3712,7 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
             model_verbosity: None,
+            model_personality: None,
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
             developer_instructions: None,
@@ -3805,6 +3815,7 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
             model_verbosity: None,
+            model_personality: None,
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
             developer_instructions: None,
@@ -3893,6 +3904,7 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::Detailed,
             model_supports_reasoning_summaries: None,
             model_verbosity: Some(Verbosity::High),
+            model_personality: None,
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             base_instructions: None,
             developer_instructions: None,
