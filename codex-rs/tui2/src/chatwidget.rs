@@ -387,6 +387,7 @@ pub(crate) struct ChatWidget {
     // Previous status header to restore after a transient stream retry.
     retry_status_header: Option<String>,
     conversation_id: Option<ThreadId>,
+    forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
     // Whether to include the initial welcome banner on session configured
     show_welcome_banner: bool,
@@ -504,6 +505,10 @@ fn create_initial_user_message(
     }
 }
 
+// When merging multiple queued drafts (e.g., after interrupt), each draft starts numbering
+// its attachments at [Image #1]. Reassign placeholder labels based on the attachment list so
+// the combined local_image_paths order matches the labels, even if placeholders were moved
+// in the text (e.g., [Image #2] appearing before [Image #1]).
 fn remap_placeholders_for_message(
     text: &str,
     text_elements: Vec<TextElement>,
@@ -514,10 +519,6 @@ fn remap_placeholders_for_message(
         return (text.to_string(), text_elements, Vec::new());
     }
 
-    // When merging multiple queued drafts (e.g., after interrupt), each draft starts numbering
-    // its attachments at [Image #1]. Reassign placeholder labels based on the attachment list so
-    // the combined local_image_paths order matches the labels, even if placeholders were moved
-    // in the text (e.g., [Image #2] appearing before [Image #1]).
     let mut mapping: HashMap<String, String> = HashMap::new();
     let mut remapped_images = Vec::new();
     for attachment in local_images {
@@ -614,6 +615,7 @@ impl ChatWidget {
             .set_history_metadata(event.history_log_id, event.history_entry_count);
         self.set_skills(None);
         self.conversation_id = Some(event.session_id);
+        self.forked_from = event.forked_from_id;
         self.current_rollout_path = Some(event.rollout_path.clone());
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
@@ -634,7 +636,7 @@ impl ChatWidget {
         self.submit_op(Op::ListCustomPrompts);
         self.submit_op(Op::ListSkills {
             cwds: Vec::new(),
-            force_reload: false,
+            force_reload: true,
         });
         if let Some(user_message) = self.initial_user_message.take() {
             self.submit_user_message(user_message);
@@ -819,16 +821,17 @@ impl ChatWidget {
 
     pub(crate) fn on_rate_limit_snapshot(&mut self, snapshot: Option<RateLimitSnapshot>) {
         if let Some(mut snapshot) = snapshot {
-            snapshot.credits = snapshot.credits.or_else(|| {
-                self.rate_limit_snapshot
+            if snapshot.credits.is_none() {
+                snapshot.credits = self
+                    .rate_limit_snapshot
                     .as_ref()
                     .and_then(|display| display.credits.as_ref())
                     .map(|credits| CreditsSnapshot {
                         has_credits: credits.has_credits,
                         unlimited: credits.unlimited,
                         balance: credits.balance.clone(),
-                    })
-            });
+                    });
+            }
 
             self.plan_type = snapshot.plan_type.or(self.plan_type);
 
@@ -1638,6 +1641,7 @@ impl ChatWidget {
             current_status_header: String::from("Working"),
             retry_status_header: None,
             conversation_id: None,
+            forked_from: None,
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
@@ -1736,6 +1740,7 @@ impl ChatWidget {
             current_status_header: String::from("Working"),
             retry_status_header: None,
             conversation_id: None,
+            forked_from: None,
             queued_user_messages: VecDeque::new(),
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
@@ -1925,7 +1930,7 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
             SlashCommand::Fork => {
-                self.app_event_tx.send(AppEvent::OpenForkPicker);
+                self.app_event_tx.send(AppEvent::ForkCurrentSession);
             }
             SlashCommand::Init => {
                 let init_target = self.config.cwd.join(DEFAULT_PROJECT_DOC_FILENAME);
@@ -2568,6 +2573,7 @@ impl ChatWidget {
             token_info,
             total_usage,
             &self.conversation_id,
+            self.forked_from,
             self.rate_limit_snapshot.as_ref(),
             self.plan_type,
             Local::now(),
@@ -2655,6 +2661,7 @@ impl ChatWidget {
                 model: Some(switch_model.clone()),
                 effort: Some(Some(default_effort)),
                 summary: None,
+                collaboration_mode: None,
             }));
             tx.send(AppEvent::UpdateModel(switch_model.clone()));
             tx.send(AppEvent::UpdateReasoningEffort(Some(default_effort)));
@@ -2887,6 +2894,7 @@ impl ChatWidget {
                 model: Some(model_for_action.clone()),
                 effort: Some(effort_for_action),
                 summary: None,
+                collaboration_mode: None,
             }));
             tx.send(AppEvent::UpdateModel(model_for_action.clone()));
             tx.send(AppEvent::UpdateReasoningEffort(effort_for_action));
@@ -3058,6 +3066,7 @@ impl ChatWidget {
                 model: Some(model.clone()),
                 effort: Some(effort),
                 summary: None,
+                collaboration_mode: None,
             }));
         self.app_event_tx.send(AppEvent::UpdateModel(model.clone()));
         self.app_event_tx
@@ -3203,6 +3212,7 @@ impl ChatWidget {
                 model: None,
                 effort: None,
                 summary: None,
+                collaboration_mode: None,
             }));
             tx.send(AppEvent::UpdateAskForApprovalPolicy(approval));
             tx.send(AppEvent::UpdateSandboxPolicy(sandbox_clone));

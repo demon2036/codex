@@ -357,7 +357,7 @@ impl ChatComposer {
     /// In all cases, clears any paste-burst Enter suppression state so a real paste cannot affect
     /// the next user Enter key, then syncs popup state.
     pub fn handle_paste(&mut self, pasted: String) -> bool {
-        let pasted = pasted.replace("\r\n", "\n").replace("\r", "\n");
+        let pasted = pasted.replace("\r\n", "\n").replace('\r', "\n");
         let char_count = pasted.chars().count();
         if char_count > LARGE_PASTE_CHAR_THRESHOLD {
             let placeholder = self.next_large_paste_placeholder(char_count);
@@ -512,6 +512,7 @@ impl ChatComposer {
     }
 
     /// Replace the entire composer content with `text` and reset cursor.
+    /// This clears any pending paste payloads.
     pub(crate) fn set_text_content(
         &mut self,
         text: String,
@@ -809,6 +810,7 @@ impl ChatComposer {
                                 ) {
                                     PromptSelectionAction::Insert { text, cursor } => {
                                         let target = cursor.unwrap_or(text.len());
+                                        // Inserted prompt text is plain input; discard any elements.
                                         self.textarea.set_text_clearing_elements(&text);
                                         cursor_target = Some(target);
                                     }
@@ -1453,6 +1455,7 @@ impl ChatComposer {
         new_text.push(' ');
         new_text.push_str(&text[end_idx..]);
 
+        // Path replacement is plain text; rebuild without carrying elements.
         self.textarea.set_text_clearing_elements(&new_text);
         let new_cursor = start_idx.saturating_add(inserted.len()).saturating_add(1);
         self.textarea.set_cursor(new_cursor);
@@ -1488,6 +1491,7 @@ impl ChatComposer {
         new_text.push(' ');
         new_text.push_str(&text[end_idx..]);
 
+        // Skill insertion rebuilds plain text, so drop existing elements.
         self.textarea.set_text_clearing_elements(&new_text);
         let new_cursor = start_idx.saturating_add(inserted.len()).saturating_add(1);
         self.textarea.set_cursor(new_cursor);
@@ -1588,7 +1592,6 @@ impl ChatComposer {
         if !text.is_empty() {
             self.history.record_local_submission(&text);
         }
-        // Placeholder elements have been expanded into real text, so payloads can be dropped.
         self.pending_pastes.clear();
         Some((text, text_elements))
     }
@@ -1645,6 +1648,7 @@ impl ChatComposer {
             .iter()
             .map(|img| img.path.clone())
             .collect::<Vec<_>>();
+        let original_pending_pastes = self.pending_pastes.clone();
         if let Some(result) = self.try_dispatch_slash_command_with_args() {
             return (result, true);
         }
@@ -1671,11 +1675,11 @@ impl ChatComposer {
         } else {
             // Restore text if submission was suppressed.
             self.set_text_content(
-                original_input.clone(),
+                original_input,
                 original_text_elements,
                 original_local_image_paths,
             );
-            self.textarea.set_cursor(original_input.len());
+            self.pending_pastes = original_pending_pastes;
             (InputResult::None, true)
         }
     }
@@ -2695,9 +2699,6 @@ mod tests {
             "Ask Codex to do anything".to_string(),
             false,
         );
-        composer.set_steer_enabled(true);
-        composer.set_steer_enabled(true);
-        composer.set_steer_enabled(true);
         composer.set_steer_enabled(true);
         composer.set_steer_enabled(true);
         composer.set_steer_enabled(true);
@@ -4127,6 +4128,185 @@ mod tests {
         }
         let imgs = composer.take_recent_submission_images();
         assert_eq!(vec![path], imgs);
+    }
+
+    #[test]
+    fn large_paste_preserves_image_text_elements_on_submit() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_steer_enabled(true);
+
+        let large_content = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
+        composer.handle_paste(large_content.clone());
+        composer.handle_paste(" ".into());
+        let path = PathBuf::from("/tmp/image_with_paste.png");
+        composer.attach_image(path.clone());
+
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            } => {
+                let expected = format!("{large_content} [Image #1]");
+                assert_eq!(text, expected);
+                assert_eq!(text_elements.len(), 1);
+                assert_eq!(text_elements[0].placeholder.as_deref(), Some("[Image #1]"));
+                assert_eq!(
+                    text_elements[0].byte_range,
+                    ByteRange {
+                        start: large_content.len() + 1,
+                        end: large_content.len() + 1 + "[Image #1]".len(),
+                    }
+                );
+            }
+            _ => panic!("expected Submitted"),
+        }
+        let imgs = composer.take_recent_submission_images();
+        assert_eq!(vec![path], imgs);
+    }
+
+    #[test]
+    fn large_paste_with_leading_whitespace_trims_and_shifts_elements() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_steer_enabled(true);
+
+        let large_content = format!("  {}", "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5));
+        composer.handle_paste(large_content.clone());
+        composer.handle_paste(" ".into());
+        let path = PathBuf::from("/tmp/image_with_trim.png");
+        composer.attach_image(path.clone());
+
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            } => {
+                let trimmed = large_content.trim().to_string();
+                assert_eq!(text, format!("{trimmed} [Image #1]"));
+                assert_eq!(text_elements.len(), 1);
+                assert_eq!(text_elements[0].placeholder.as_deref(), Some("[Image #1]"));
+                assert_eq!(
+                    text_elements[0].byte_range,
+                    ByteRange {
+                        start: trimmed.len() + 1,
+                        end: trimmed.len() + 1 + "[Image #1]".len(),
+                    }
+                );
+            }
+            _ => panic!("expected Submitted"),
+        }
+        let imgs = composer.take_recent_submission_images();
+        assert_eq!(vec![path], imgs);
+    }
+
+    #[test]
+    fn pasted_crlf_normalizes_newlines_for_elements() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_steer_enabled(true);
+
+        let pasted = "line1\r\nline2\r\n".to_string();
+        composer.handle_paste(pasted);
+        composer.handle_paste(" ".into());
+        let path = PathBuf::from("/tmp/image_crlf.png");
+        composer.attach_image(path.clone());
+
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            } => {
+                assert_eq!(text, "line1\nline2\n [Image #1]");
+                assert!(!text.contains('\r'));
+                assert_eq!(text_elements.len(), 1);
+                assert_eq!(text_elements[0].placeholder.as_deref(), Some("[Image #1]"));
+                assert_eq!(
+                    text_elements[0].byte_range,
+                    ByteRange {
+                        start: "line1\nline2\n ".len(),
+                        end: "line1\nline2\n [Image #1]".len(),
+                    }
+                );
+            }
+            _ => panic!("expected Submitted"),
+        }
+        let imgs = composer.take_recent_submission_images();
+        assert_eq!(vec![path], imgs);
+    }
+
+    #[test]
+    fn suppressed_submission_restores_pending_paste_payload() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_steer_enabled(true);
+
+        composer.textarea.set_text_clearing_elements("/unknown ");
+        composer.textarea.set_cursor("/unknown ".len());
+        let large_content = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
+        composer.handle_paste(large_content.clone());
+        let placeholder = composer
+            .pending_pastes
+            .first()
+            .expect("expected pending paste")
+            .0
+            .clone();
+
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(result, InputResult::None));
+        assert_eq!(composer.pending_pastes.len(), 1);
+        assert_eq!(composer.textarea.text(), format!("/unknown {placeholder}"));
+
+        composer.textarea.set_cursor(0);
+        composer.textarea.insert_str(" ");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            } => {
+                assert_eq!(text, format!("/unknown {large_content}"));
+                assert!(text_elements.is_empty());
+            }
+            _ => panic!("expected Submitted"),
+        }
+        assert!(composer.pending_pastes.is_empty());
     }
 
     #[test]
