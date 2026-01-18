@@ -450,7 +450,7 @@ impl ChatComposer {
         local_image_paths: Vec<PathBuf>,
     ) {
         // Clear any existing content, placeholders, and attachments first.
-        self.textarea.set_text("");
+        self.textarea.set_text_clearing_elements("");
         self.pending_pastes.clear();
         self.attached_images.clear();
 
@@ -716,7 +716,7 @@ impl ChatComposer {
                     match sel {
                         CommandItem::Builtin(cmd) => {
                             if cmd == SlashCommand::Skills {
-                                self.textarea.set_text("");
+                                self.textarea.set_text_clearing_elements("");
                                 return (InputResult::Command(cmd), true);
                             }
 
@@ -724,7 +724,9 @@ impl ChatComposer {
                                 .trim_start()
                                 .starts_with(&format!("/{}", cmd.command()));
                             if !starts_with_cmd {
-                                self.textarea.set_text(&format!("/{} ", cmd.command()));
+                                // Slash completion replaces the buffer with plain text; drop elements.
+                                self.textarea
+                                    .set_text_clearing_elements(&format!("/{} ", cmd.command()));
                             }
                             if !self.textarea.text().is_empty() {
                                 cursor_target = Some(self.textarea.text().len());
@@ -739,7 +741,8 @@ impl ChatComposer {
                                 ) {
                                     PromptSelectionAction::Insert { text, cursor } => {
                                         let target = cursor.unwrap_or(text.len());
-                                        self.textarea.set_text(&text);
+                                        // Inserted prompt text is plain input; discard any elements.
+                                        self.textarea.set_text_clearing_elements(&text);
                                         cursor_target = Some(target);
                                     }
                                     PromptSelectionAction::Submit { .. } => {}
@@ -768,7 +771,7 @@ impl ChatComposer {
                     && let Some(expanded) =
                         expand_if_numeric_with_positional_args(prompt, first_line)
                 {
-                    self.textarea.set_text("");
+                    self.textarea.set_text_clearing_elements("");
                     return (
                         InputResult::Submitted {
                             text: expanded,
@@ -782,7 +785,7 @@ impl ChatComposer {
                 if let Some(sel) = popup.selected_item() {
                     match sel {
                         CommandItem::Builtin(cmd) => {
-                            self.textarea.set_text("");
+                            self.textarea.set_text_clearing_elements("");
                             return (InputResult::Command(cmd), true);
                         }
                         CommandItem::UserPrompt(idx) => {
@@ -793,7 +796,7 @@ impl ChatComposer {
                                     PromptSelectionMode::Submit,
                                 ) {
                                     PromptSelectionAction::Submit { text } => {
-                                        self.textarea.set_text("");
+                                        self.textarea.set_text_clearing_elements("");
                                         return (
                                             InputResult::Submitted {
                                                 text,
@@ -805,7 +808,8 @@ impl ChatComposer {
                                     }
                                     PromptSelectionAction::Insert { text, cursor } => {
                                         let target = cursor.unwrap_or(text.len());
-                                        self.textarea.set_text(&text);
+                                        // Inserted prompt text is plain input; discard any elements.
+                                        self.textarea.set_text_clearing_elements(&text);
                                         self.textarea.set_cursor(target);
                                         return (InputResult::None, true);
                                     }
@@ -1383,7 +1387,8 @@ impl ChatComposer {
         new_text.push(' ');
         new_text.push_str(&text[end_idx..]);
 
-        self.textarea.set_text(&new_text);
+        // Path replacement is plain text; rebuild without carrying elements.
+        self.textarea.set_text_clearing_elements(&new_text);
         let new_cursor = start_idx.saturating_add(inserted.len()).saturating_add(1);
         self.textarea.set_cursor(new_cursor);
     }
@@ -1418,12 +1423,14 @@ impl ChatComposer {
         new_text.push(' ');
         new_text.push_str(&text[end_idx..]);
 
-        self.textarea.set_text(&new_text);
+        // Skill insertion rebuilds plain text, so drop existing elements.
+        self.textarea.set_text_clearing_elements(&new_text);
         let new_cursor = start_idx.saturating_add(inserted.len()).saturating_add(1);
         self.textarea.set_cursor(new_cursor);
     }
 
     /// Prepare text for submission/queuing. Returns None if submission should be suppressed.
+    /// On success, clears pending paste payloads because placeholders have been expanded.
     fn prepare_submission_text(&mut self) -> Option<(String, Vec<TextElement>)> {
         let mut text = self.textarea.text().to_string();
         let original_input = text.clone();
@@ -1435,7 +1442,7 @@ impl ChatComposer {
             .collect::<Vec<_>>();
         let mut text_elements = original_text_elements.clone();
         let input_starts_with_space = original_input.starts_with(' ');
-        self.textarea.set_text("");
+        self.textarea.set_text_clearing_elements("");
 
         if !self.pending_pastes.is_empty() {
             // Expand placeholders so element byte ranges stay aligned.
@@ -1443,7 +1450,6 @@ impl ChatComposer {
                 Self::expand_pending_pastes(&text, text_elements, &self.pending_pastes);
             text = expanded;
             text_elements = expanded_elements;
-            self.pending_pastes.clear();
         }
 
         // If there is neither text nor attachments, suppress submission entirely.
@@ -1513,6 +1519,8 @@ impl ChatComposer {
         if !text.is_empty() {
             self.history.record_local_submission(&text);
         }
+        // Placeholder elements have been expanded into real text, so payloads can be dropped.
+        self.pending_pastes.clear();
         Some((text, text_elements))
     }
 
@@ -1568,6 +1576,7 @@ impl ChatComposer {
             .iter()
             .map(|img| img.path.clone())
             .collect::<Vec<_>>();
+        let original_pending_pastes = self.pending_pastes.clone();
         if let Some(result) = self.try_dispatch_slash_command_with_args() {
             return (result, true);
         }
@@ -1598,6 +1607,7 @@ impl ChatComposer {
                 original_text_elements,
                 original_local_image_paths,
             );
+            self.pending_pastes = original_pending_pastes;
             (InputResult::None, true)
         }
     }
@@ -1615,7 +1625,7 @@ impl ChatComposer {
                 })
                 .find(|(n, _)| *n == name)
         {
-            self.textarea.set_text("");
+            self.textarea.set_text_clearing_elements("");
             Some(InputResult::Command(cmd))
         } else {
             None
@@ -1638,7 +1648,7 @@ impl ChatComposer {
                     .find(|(command_name, _)| *command_name == name)
                 && cmd == SlashCommand::Review
             {
-                self.textarea.set_text("");
+                self.textarea.set_text_clearing_elements("");
                 return Some(InputResult::CommandWithArgs(cmd, rest.to_string()));
             }
         }
@@ -3188,7 +3198,7 @@ mod tests {
             false,
         );
 
-        composer.textarea.set_text("/diff");
+        composer.textarea.set_text_clearing_elements("/diff");
         composer.textarea.set_cursor("/diff".len());
         composer
             .paste_burst
@@ -4055,7 +4065,7 @@ mod tests {
                     composer.textarea.text().contains(&placeholder),
                     composer.pending_pastes.len(),
                 );
-                composer.textarea.set_text("");
+                composer.textarea.set_text_clearing_elements("");
                 result
             })
             .collect();
@@ -4151,6 +4161,52 @@ mod tests {
         }
         let imgs = composer.take_recent_submission_images();
         assert_eq!(vec![path], imgs);
+    }
+
+    #[test]
+    fn suppressed_submission_restores_pending_paste_payload() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+        composer.set_steer_enabled(true);
+
+        composer.textarea.set_text_clearing_elements("/unknown ");
+        let large_content = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 5);
+        composer.handle_paste(large_content.clone());
+        let placeholder = composer
+            .pending_pastes
+            .first()
+            .expect("expected pending paste")
+            .0
+            .clone();
+
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(result, InputResult::None));
+        assert_eq!(composer.pending_pastes.len(), 1);
+        assert_eq!(composer.textarea.text(), format!("/unknown {placeholder}"));
+
+        composer.textarea.set_cursor(0);
+        composer.textarea.insert_str(" ");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Submitted {
+                text,
+                text_elements,
+            } => {
+                assert_eq!(text, format!("/unknown {large_content}"));
+                assert!(text_elements.is_empty());
+            }
+            _ => panic!("expected Submitted"),
+        }
+        assert!(composer.pending_pastes.is_empty());
     }
 
     #[test]
@@ -4501,7 +4557,7 @@ mod tests {
 
         composer
             .textarea
-            .set_text("/prompts:my-prompt USER=Alice BRANCH=main");
+            .set_text_clearing_elements("/prompts:my-prompt USER=Alice BRANCH=main");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4537,7 +4593,7 @@ mod tests {
 
         composer
             .textarea
-            .set_text("/prompts:my-prompt USER=\"Alice Smith\" BRANCH=dev-main");
+            .set_text_clearing_elements("/prompts:my-prompt USER=\"Alice Smith\" BRANCH=dev-main");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4580,7 +4636,7 @@ mod tests {
 
         // Type the slash command
         let command_text = "/prompts:code-review ";
-        composer.textarea.set_text(command_text);
+        composer.textarea.set_text_clearing_elements(command_text);
         composer.textarea.set_cursor(command_text.len());
 
         // Paste large content (>3000 chars) to trigger placeholder
@@ -4636,7 +4692,7 @@ mod tests {
 
         composer
             .textarea
-            .set_text("/Users/example/project/src/main.rs");
+            .set_text_clearing_elements("/Users/example/project/src/main.rs");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4671,7 +4727,9 @@ mod tests {
         );
         composer.set_steer_enabled(true);
 
-        composer.textarea.set_text(" /this-looks-like-a-command");
+        composer
+            .textarea
+            .set_text_clearing_elements(" /this-looks-like-a-command");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4711,7 +4769,7 @@ mod tests {
 
         composer
             .textarea
-            .set_text("/prompts:my-prompt USER=Alice stray");
+            .set_text_clearing_elements("/prompts:my-prompt USER=Alice stray");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4760,7 +4818,9 @@ mod tests {
         }]);
 
         // Provide only one of the required args
-        composer.textarea.set_text("/prompts:my-prompt USER=Alice");
+        composer
+            .textarea
+            .set_text_clearing_elements("/prompts:my-prompt USER=Alice");
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -4855,7 +4915,9 @@ mod tests {
         }]);
 
         // Type positional args; should submit with numeric expansion, no errors.
-        composer.textarea.set_text("/prompts:elegant hi");
+        composer
+            .textarea
+            .set_text_clearing_elements("/prompts:elegant hi");
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
