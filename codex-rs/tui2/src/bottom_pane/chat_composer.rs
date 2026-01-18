@@ -344,7 +344,7 @@ impl ChatComposer {
         let Some(text) = self.history.on_entry_response(log_id, offset, entry) else {
             return false;
         };
-        // History lookup returns plain text only; no UI element ranges or attachments to restore.
+        // Composer history (↑/↓) stores plain text only; no UI element ranges/attachments to restore here.
         self.set_text_content(text, Vec::new(), Vec::new());
         true
     }
@@ -726,6 +726,7 @@ impl ChatComposer {
                                 .trim_start()
                                 .starts_with(&format!("/{}", cmd.command()));
                             if !starts_with_cmd {
+                                // Slash completion replaces the buffer with plain text; drop elements.
                                 self.textarea
                                     .set_text_clearing_elements(&format!("/{} ", cmd.command()));
                             }
@@ -1525,6 +1526,7 @@ impl ChatComposer {
         if !text.is_empty() {
             self.history.record_local_submission(&text);
         }
+        // Placeholder elements have been expanded into real text, so payloads can be dropped.
         self.pending_pastes.clear();
         Some((text, text_elements))
     }
@@ -1608,11 +1610,11 @@ impl ChatComposer {
         } else {
             // Restore text if submission was suppressed.
             self.set_text_content(
-                original_input.clone(),
+                original_input,
                 original_text_elements,
                 original_local_image_paths,
             );
-            self.textarea.set_cursor(original_input.len());
+            self.pending_pastes = original_pending_pastes;
             (InputResult::None, true)
         }
     }

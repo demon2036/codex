@@ -428,7 +428,7 @@ fn content_texts(content: &[ContentItem]) -> Vec<&str> {
     content
         .iter()
         .filter_map(|item| match item {
-            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+            ContentItem::InputText { text, .. } | ContentItem::OutputText { text } => {
                 Some(text.as_str())
             }
             _ => None,
