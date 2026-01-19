@@ -349,7 +349,7 @@ async fn helpers_are_available_and_do_not_panic() {
     ));
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let init = ChatWidgetInit {
-        config: cfg,
+        config: cfg.clone(),
         frame_requester: FrameRequester::test_dummy(),
         app_event_tx: tx,
         initial_prompt: None,
@@ -395,19 +395,35 @@ async fn make_chatwidget_manual(
         skills: None,
     });
     bottom.set_steer_enabled(true);
+    bottom.set_collaboration_modes_enabled(cfg.features.enabled(Feature::CollaborationModes));
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let codex_home = cfg.codex_home.clone();
+    let models_manager = Arc::new(ModelsManager::new(codex_home, auth_manager.clone()));
     let widget = ChatWidget {
         app_event_tx,
         codex_op_tx: op_tx,
         bottom_pane: bottom,
         active_cell: None,
         active_cell_revision: 0,
-        config: cfg,
+        config: cfg.clone(),
         model: Some(resolved_model.clone()),
-        collaboration_mode: CollaborationModeSelection::default(),
+        stored_collaboration_mode: if cfg.features.enabled(Feature::CollaborationModes) {
+            collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
+                CollaborationMode::Custom(Settings {
+                    model: resolved_model.clone(),
+                    reasoning_effort: cfg.model_reasoning_effort,
+                    developer_instructions: None,
+                })
+            })
+        } else {
+            CollaborationMode::Custom(Settings {
+                model: resolved_model.clone(),
+                reasoning_effort: cfg.model_reasoning_effort,
+                developer_instructions: None,
+            })
+        },
         auth_manager: auth_manager.clone(),
-        models_manager: Arc::new(ModelsManager::new(codex_home, auth_manager)),
+        models_manager,
         session_header: SessionHeader::new(resolved_model),
         initial_user_message: None,
         token_info: None,
@@ -1521,65 +1537,54 @@ async fn slash_init_skips_when_project_doc_exists() {
     );
 }
 
-#[test]
-fn parse_collaboration_mode_selection_accepts_common_aliases() {
-    assert_eq!(
-        collaboration_modes::parse_selection("plan"),
-        Some(CollaborationModeSelection::Plan)
-    );
-    assert_eq!(
-        collaboration_modes::parse_selection("PAIR"),
-        Some(CollaborationModeSelection::PairProgramming)
-    );
-    assert_eq!(
-        collaboration_modes::parse_selection("pair_programming"),
-        Some(CollaborationModeSelection::PairProgramming)
-    );
-    assert_eq!(
-        collaboration_modes::parse_selection("pp"),
-        Some(CollaborationModeSelection::PairProgramming)
-    );
-    assert_eq!(
-        collaboration_modes::parse_selection(" exec "),
-        Some(CollaborationModeSelection::Execute)
-    );
-    assert_eq!(
-        collaboration_modes::parse_selection("execute"),
-        Some(CollaborationModeSelection::Execute)
-    );
-    assert_eq!(collaboration_modes::parse_selection("unknown"), None);
-}
-
 #[tokio::test]
 async fn collab_mode_shift_tab_cycles_only_when_enabled_and_idle() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, false);
 
-    let initial = chat.collaboration_mode;
+    let initial = chat.stored_collaboration_mode.clone();
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
-    assert_eq!(chat.collaboration_mode, initial);
+    assert_eq!(chat.stored_collaboration_mode, initial);
 
     chat.set_feature_enabled(Feature::CollaborationModes, true);
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
-    assert_eq!(chat.collaboration_mode, CollaborationModeSelection::Execute);
+    assert!(matches!(
+        chat.stored_collaboration_mode,
+        CollaborationMode::PairProgramming(_)
+    ));
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
-    assert_eq!(chat.collaboration_mode, CollaborationModeSelection::Plan);
+    assert!(matches!(
+        chat.stored_collaboration_mode,
+        CollaborationMode::Execute(_)
+    ));
 
     chat.on_task_started();
+    let before = chat.stored_collaboration_mode.clone();
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
-    assert_eq!(chat.collaboration_mode, CollaborationModeSelection::Plan);
+    assert_eq!(chat.stored_collaboration_mode, before);
 }
 
 #[tokio::test]
-async fn collab_slash_command_sets_mode_and_next_submit_sends_user_turn() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
+async fn collab_slash_command_opens_picker_and_updates_mode() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
 
-    chat.dispatch_command_with_args(SlashCommand::Collab, "plan".to_string());
-    assert_eq!(chat.collaboration_mode, CollaborationModeSelection::Plan);
+    chat.dispatch_command(SlashCommand::Collab);
+    let popup = render_bottom_popup(&chat, 80);
+    assert!(
+        popup.contains("Select Collaboration Mode"),
+        "expected collaboration picker: {popup}"
+    );
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let selected_mode = match rx.try_recv() {
+        Ok(AppEvent::UpdateCollaborationMode(mode)) => mode,
+        other => panic!("expected UpdateCollaborationMode event, got {other:?}"),
+    };
+    chat.set_collaboration_mode(selected_mode);
 
     chat.bottom_pane.set_composer_text("hello".to_string());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
@@ -1603,7 +1608,7 @@ async fn collab_slash_command_sets_mode_and_next_submit_sends_user_turn() {
 }
 
 #[tokio::test]
-async fn collab_mode_defaults_to_pair_programming_when_enabled() {
+async fn collab_mode_defaults_to_first_preset_when_enabled() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
@@ -1612,10 +1617,10 @@ async fn collab_mode_defaults_to_pair_programming_when_enabled() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
-            collaboration_mode: Some(CollaborationMode::PairProgramming(_)),
+            collaboration_mode: Some(CollaborationMode::Plan(_)),
             ..
         } => {}
-        other => panic!("expected Op::UserTurn with pair programming collab mode, got {other:?}"),
+        other => panic!("expected Op::UserTurn with plan collab mode, got {other:?}"),
     }
 }
 
@@ -2331,7 +2336,7 @@ async fn model_reasoning_selection_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
 
     set_chatgpt_auth(&mut chat);
-    chat.config.model_reasoning_effort = Some(ReasoningEffortConfig::High);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);
@@ -2345,7 +2350,7 @@ async fn model_reasoning_selection_popup_extra_high_warning_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.1-codex-max")).await;
 
     set_chatgpt_auth(&mut chat);
-    chat.config.model_reasoning_effort = Some(ReasoningEffortConfig::XHigh);
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
     chat.open_reasoning_popup(preset);

@@ -1701,6 +1701,9 @@ impl App {
                 self.chat_widget.set_model(&model);
                 self.current_model = model;
             }
+            AppEvent::UpdateCollaborationMode(mode) => {
+                self.chat_widget.set_collaboration_mode(mode);
+            }
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }

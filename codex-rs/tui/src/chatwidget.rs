@@ -92,6 +92,8 @@ use codex_core::skills::model::SkillMetadata;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
 use codex_protocol::approvals::ElicitationRequestEvent;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::Settings;
 use codex_protocol::parse_command::ParsedCommand;
 use codex_protocol::user_input::UserInput;
 use crossterm::event::KeyCode;
@@ -372,8 +374,6 @@ pub(crate) enum ExternalEditorState {
     Active,
 }
 
-type CollaborationModeSelection = collaboration_modes::Selection;
-
 /// Maintains the per-session UI state and interaction state machines for the chat screen.
 ///
 /// `ChatWidget` owns the state derived from the protocol event stream (history cells, streaming
@@ -403,11 +403,12 @@ pub(crate) struct ChatWidget {
     active_cell_revision: u64,
     config: Config,
     model: Option<String>,
-    /// Current UI selection for collaboration modes.
+    /// Stored collaboration mode with model and reasoning effort.
     ///
-    /// This selection is only meaningful when `Feature::CollaborationModes` is enabled; when the
-    /// feature is disabled, the value is effectively inert.
-    collaboration_mode: CollaborationModeSelection,
+    /// When collaboration modes feature is enabled, this is initialized to the first preset.
+    /// When disabled, this is Custom. The model and reasoning effort are stored here instead of
+    /// being read from config or current_model.
+    stored_collaboration_mode: CollaborationMode,
     auth_manager: Arc<AuthManager>,
     models_manager: Arc<ModelsManager>,
     session_header: SessionHeader,
@@ -615,6 +616,12 @@ impl ChatWidget {
         let model_for_header = event.model.clone();
         self.model = Some(model_for_header.clone());
         self.session_header.set_model(&model_for_header);
+        // Update stored collaboration mode with model and reasoning effort from session.
+        self.stored_collaboration_mode = CollaborationMode::Custom(Settings {
+            model: model_for_header.clone(),
+            reasoning_effort: event.reasoning_effort,
+            developer_instructions: None,
+        });
         let session_info_cell = history_cell::new_session_info(
             &self.config,
             &model_for_header,
@@ -1663,6 +1670,22 @@ impl ChatWidget {
             None
         };
 
+        let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
+            collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
+                CollaborationMode::Custom(Settings {
+                    model: model_for_header.clone(),
+                    reasoning_effort: config.model_reasoning_effort,
+                    developer_instructions: None,
+                })
+            })
+        } else {
+            CollaborationMode::Custom(Settings {
+                model: model_for_header.clone(),
+                reasoning_effort: config.model_reasoning_effort,
+                developer_instructions: None,
+            })
+        };
+
         let mut widget = Self {
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
@@ -1681,7 +1704,7 @@ impl ChatWidget {
             active_cell_revision: 0,
             config,
             model,
-            collaboration_mode: CollaborationModeSelection::default(),
+            stored_collaboration_mode,
             auth_manager,
             models_manager,
             session_header: SessionHeader::new(model_for_header),
@@ -1766,6 +1789,22 @@ impl ChatWidget {
         let codex_op_tx =
             spawn_agent_from_existing(conversation, session_configured, app_event_tx.clone());
 
+        let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
+            collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
+                CollaborationMode::Custom(Settings {
+                    model: header_model.clone(),
+                    reasoning_effort: config.model_reasoning_effort,
+                    developer_instructions: None,
+                })
+            })
+        } else {
+            CollaborationMode::Custom(Settings {
+                model: header_model.clone(),
+                reasoning_effort: config.model_reasoning_effort,
+                developer_instructions: None,
+            })
+        };
+
         let mut widget = Self {
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
@@ -1784,7 +1823,7 @@ impl ChatWidget {
             active_cell_revision: 0,
             config,
             model: Some(header_model.clone()),
-            collaboration_mode: CollaborationModeSelection::default(),
+            stored_collaboration_mode,
             auth_manager,
             models_manager,
             session_header: SessionHeader::new(header_model),
@@ -2050,7 +2089,7 @@ impl ChatWidget {
             }
             SlashCommand::Collab => {
                 if self.collaboration_modes_enabled() {
-                    self.cycle_collaboration_mode();
+                    self.open_collaboration_modes_popup();
                 }
             }
             SlashCommand::Approvals => {
@@ -2209,14 +2248,10 @@ impl ChatWidget {
 
         let trimmed = args.trim();
         match cmd {
-            SlashCommand::Collab if !trimmed.is_empty() => {
-                if let Some(selection) = collaboration_modes::parse_selection(trimmed) {
-                    self.set_collaboration_mode(selection);
-                } else {
-                    self.add_error_message(format!(
-                        "Unknown collaboration mode '{trimmed}'. Try: plan, pair, execute."
-                    ));
-                    self.request_redraw();
+            SlashCommand::Collab => {
+                let _ = trimmed;
+                if self.collaboration_modes_enabled() {
+                    self.open_collaboration_modes_popup();
                 }
             }
             SlashCommand::Review if !trimmed.is_empty() => {
@@ -2351,24 +2386,18 @@ impl ChatWidget {
             }
         }
 
-        let collaboration_mode = self.collaboration_modes_enabled().then(|| {
-            collaboration_modes::resolve_mode_or_fallback(
-                self.models_manager.as_ref(),
-                self.collaboration_mode,
-                model.as_str(),
-                self.config.model_reasoning_effort,
-            )
-        });
         let op = Op::UserTurn {
             items,
             cwd: self.config.cwd.clone(),
             approval_policy: self.config.approval_policy.value(),
             sandbox_policy: self.config.sandbox_policy.get().clone(),
-            model,
-            effort: self.config.model_reasoning_effort,
+            model: self.stored_collaboration_mode.model().to_string(),
+            effort: self.stored_collaboration_mode.reasoning_effort(),
             summary: self.config.model_reasoning_summary,
             final_output_json_schema: None,
-            collaboration_mode,
+            collaboration_mode: self
+                .collaboration_modes_enabled()
+                .then(|| self.stored_collaboration_mode.clone()),
         };
 
         self.codex_op_tx.send(op).unwrap_or_else(|e| {
@@ -2698,11 +2727,7 @@ impl ChatWidget {
         let total_usage = token_info
             .map(|ti| &ti.total_token_usage)
             .unwrap_or(&default_usage);
-        let collaboration_mode = if self.collaboration_modes_enabled() {
-            Some(self.collaboration_mode.label())
-        } else {
-            None
-        };
+        let collaboration_mode = self.collaboration_mode_label();
         self.add_to_history(crate::status::new_status_output(
             &self.config,
             self.auth_manager.as_ref(),
@@ -3068,6 +3093,50 @@ impl ChatWidget {
         });
     }
 
+    pub(crate) fn open_collaboration_modes_popup(&mut self) {
+        let presets = self.models_manager.list_collaboration_modes();
+        if presets.is_empty() {
+            self.add_info_message(
+                "No collaboration modes are available right now.".to_string(),
+                None,
+            );
+            return;
+        }
+
+        let items: Vec<SelectionItem> = presets
+            .into_iter()
+            .map(|preset| {
+                let name = match preset {
+                    CollaborationMode::Plan(_) => "Plan",
+                    CollaborationMode::PairProgramming(_) => "Pair Programming",
+                    CollaborationMode::Execute(_) => "Execute",
+                    CollaborationMode::Custom(_) => "Custom",
+                };
+                let is_current =
+                    collaboration_modes::same_variant(&self.stored_collaboration_mode, &preset);
+                let preset_for_action = preset.clone();
+                let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                    tx.send(AppEvent::UpdateCollaborationMode(preset_for_action.clone()));
+                })];
+                SelectionItem {
+                    name: name.to_string(),
+                    is_current,
+                    actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                }
+            })
+            .collect();
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Select Collaboration Mode".to_string()),
+            subtitle: Some("Pick a collaboration preset.".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            ..Default::default()
+        });
+    }
+
     fn model_selection_actions(
         model_for_action: String,
         effort_for_action: Option<ReasoningEffortConfig>,
@@ -3165,7 +3234,7 @@ impl ChatWidget {
         let model_slug = preset.model.to_string();
         let is_current_model = self.current_model() == Some(preset.model.as_str());
         let highlight_choice = if is_current_model {
-            self.config.model_reasoning_effort
+            self.stored_collaboration_mode.reasoning_effort()
         } else {
             default_choice
         };
@@ -3964,8 +4033,21 @@ impl ChatWidget {
         }
         if feature == Feature::Steer {
             self.bottom_pane.set_steer_enabled(enabled);
-        } else if feature == Feature::CollaborationModes {
+        }
+        if feature == Feature::CollaborationModes {
             self.bottom_pane.set_collaboration_modes_enabled(enabled);
+            let settings = match &self.stored_collaboration_mode {
+                CollaborationMode::Plan(settings)
+                | CollaborationMode::PairProgramming(settings)
+                | CollaborationMode::Execute(settings)
+                | CollaborationMode::Custom(settings) => settings.clone(),
+            };
+            self.stored_collaboration_mode = if enabled {
+                collaboration_modes::default_mode(self.models_manager.as_ref())
+                    .unwrap_or_else(|| CollaborationMode::Custom(settings))
+            } else {
+                CollaborationMode::Custom(settings)
+            };
         }
     }
 
@@ -3992,40 +4074,21 @@ impl ChatWidget {
             .unwrap_or(false)
     }
 
-    /// Set the reasoning effort in the widget's config copy.
+    /// Set the reasoning effort in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.config.model_reasoning_effort = effort;
+        self.stored_collaboration_mode =
+            self.stored_collaboration_mode
+                .with_updates(None, Some(effort), None);
     }
 
-    /// Set the model in the widget's config copy.
+    /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
         self.session_header.set_model(model);
         self.model = Some(model.to_string());
-    }
-
-    fn cycle_collaboration_mode(&mut self) {
-        if !self.collaboration_modes_enabled() {
-            return;
-        }
-        let next = self.collaboration_mode.next();
-        self.set_collaboration_mode(next);
-    }
-
-    /// Update the selected collaboration mode.
-    ///
-    /// When collaboration modes are enabled, the current selection is attached to *every*
-    /// submission as `Op::UserTurn { collaboration_mode: Some(...) }`.
-    fn set_collaboration_mode(&mut self, selection: CollaborationModeSelection) {
-        if !self.collaboration_modes_enabled() {
-            return;
-        }
-        const FLASH_DURATION: Duration = Duration::from_secs(1);
-
-        self.collaboration_mode = selection;
-
-        let flash = collaboration_modes::flash_line(selection);
-        self.bottom_pane.flash_footer_hint(flash, FLASH_DURATION);
-        self.request_redraw();
+        self.stored_collaboration_mode =
+            self.stored_collaboration_mode
+                .with_updates(Some(model.to_string()), None, None);
     }
 
     fn current_model(&self) -> Option<&str> {
@@ -4038,6 +4101,76 @@ impl ChatWidget {
 
     fn model_display_name(&self) -> &str {
         self.model.as_deref().unwrap_or(DEFAULT_MODEL_DISPLAY_NAME)
+    }
+
+    /// Get the label for the current collaboration mode.
+    fn collaboration_mode_label(&self) -> Option<&'static str> {
+        if !self.collaboration_modes_enabled() {
+            return None;
+        }
+        match &self.stored_collaboration_mode {
+            CollaborationMode::Plan(_) => Some("Plan"),
+            CollaborationMode::PairProgramming(_) => Some("Pair Programming"),
+            CollaborationMode::Execute(_) => Some("Execute"),
+            CollaborationMode::Custom(_) => None,
+        }
+    }
+
+    /// Cycle to the next collaboration mode variant (Plan -> PairProgramming -> Execute -> Plan).
+    fn cycle_collaboration_mode(&mut self) {
+        if !self.collaboration_modes_enabled() {
+            return;
+        }
+
+        if let Some(next_mode) = collaboration_modes::next_mode(
+            self.models_manager.as_ref(),
+            &self.stored_collaboration_mode,
+        ) {
+            self.set_collaboration_mode(next_mode);
+        }
+    }
+
+    /// Update the stored collaboration mode.
+    ///
+    /// When collaboration modes are enabled, the current mode is attached to *every*
+    /// submission as `Op::UserTurn { collaboration_mode: Some(...) }`.
+    pub(crate) fn set_collaboration_mode(&mut self, mode: CollaborationMode) {
+        if !self.collaboration_modes_enabled() {
+            return;
+        }
+
+        // Preserve model and reasoning effort when switching modes.
+        let developer_instructions = match &mode {
+            CollaborationMode::Plan(s)
+            | CollaborationMode::PairProgramming(s)
+            | CollaborationMode::Execute(s)
+            | CollaborationMode::Custom(s) => s.developer_instructions.clone(),
+        };
+        let settings = Settings {
+            model: self.stored_collaboration_mode.model().to_string(),
+            reasoning_effort: self.stored_collaboration_mode.reasoning_effort(),
+            developer_instructions,
+        };
+
+        self.stored_collaboration_mode = match mode {
+            CollaborationMode::Plan(_) => CollaborationMode::Plan(settings),
+            CollaborationMode::PairProgramming(_) => CollaborationMode::PairProgramming(settings),
+            CollaborationMode::Execute(_) => CollaborationMode::Execute(settings),
+            CollaborationMode::Custom(_) => CollaborationMode::Custom(settings),
+        };
+
+        let label = self.collaboration_mode_label();
+        if let Some(label) = label {
+            let flash = Line::from(vec![
+                label.bold(),
+                " (".dim(),
+                key_hint::shift(KeyCode::Tab).into(),
+                " to change mode)".dim(),
+            ]);
+            const FLASH_DURATION: Duration = Duration::from_secs(2);
+            self.bottom_pane.flash_footer_hint(flash, FLASH_DURATION);
+        }
+        self.request_redraw();
     }
 
     /// Build a placeholder header cell while the session is configuring.
