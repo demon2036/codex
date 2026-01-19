@@ -105,6 +105,9 @@
         "include_apply_patch_tool": {
           "type": "boolean"
         },
+        "personality": {
+          "type": "boolean"
+        },
         "powershell_utf8": {
           "type": "boolean"
         },
@@ -236,6 +239,14 @@
       "description": "Size of the context window for the model, in tokens.",
       "type": "integer",
       "format": "int64"
+    },
+    "model_personality": {
+      "description": "Optionally specify the personality of the model",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Personality"
+        }
+      ]
     },
     "model_provider": {
       "description": "Provider to use from the model_providers map.",
@@ -581,6 +592,9 @@
             "include_apply_patch_tool": {
               "type": "boolean"
             },
+            "personality": {
+              "type": "boolean"
+            },
             "powershell_utf8": {
               "type": "boolean"
             },
@@ -625,6 +639,9 @@
         },
         "model": {
           "type": "string"
+        },
+        "model_personality": {
+          "$ref": "#/definitions/Personality"
         },
         "model_provider": {
           "description": "The key in the `model_providers` map identifying the [`ModelProviderInfo`] to use.",
@@ -1044,6 +1061,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "Personality": {
+      "type": "string",
+      "enum": [
+        "friendly",
+        "pragmatic"
+      ]
     },
     "ProjectConfig": {
       "type": "object",
