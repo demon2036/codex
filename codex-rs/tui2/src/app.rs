@@ -311,7 +311,6 @@ async fn handle_model_migration_prompt_if_needed(
                     from_model: model.to_string(),
                     to_model: target_model.clone(),
                 });
-                config.model = Some(target_model.clone());
 
                 let mapped_effort = if let Some(reasoning_effort_mapping) = reasoning_effort_mapping
                     && let Some(reasoning_effort) = config.model_reasoning_effort
@@ -323,8 +322,6 @@ async fn handle_model_migration_prompt_if_needed(
                 } else {
                     config.model_reasoning_effort
                 };
-
-                config.model_reasoning_effort = mapped_effort;
 
                 app_event_tx.send(AppEvent::UpdateModel(target_model.clone()));
                 app_event_tx.send(AppEvent::UpdateReasoningEffort(mapped_effort));
@@ -2128,7 +2125,6 @@ impl App {
 
     fn on_update_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         self.chat_widget.set_reasoning_effort(effort);
-        self.config.model_reasoning_effort = effort;
     }
 
     async fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
@@ -2617,20 +2613,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_reasoning_effort_updates_config() {
+    async fn update_reasoning_effort_updates_collaboration_mode() {
         let mut app = make_test_app().await;
-        app.config.model_reasoning_effort = Some(ReasoningEffortConfig::Medium);
         app.chat_widget
             .set_reasoning_effort(Some(ReasoningEffortConfig::Medium));
 
         app.on_update_reasoning_effort(Some(ReasoningEffortConfig::High));
 
         assert_eq!(
-            app.config.model_reasoning_effort,
-            Some(ReasoningEffortConfig::High)
-        );
-        assert_eq!(
-            app.chat_widget.config_ref().model_reasoning_effort,
+            app.chat_widget.current_reasoning_effort(),
             Some(ReasoningEffortConfig::High)
         );
     }

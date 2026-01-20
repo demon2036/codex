@@ -1460,15 +1460,13 @@ impl ChatWidget {
             is_first_run,
             model,
         } = common;
-        let mut config = config;
         let model = model.filter(|m| !m.trim().is_empty());
-        config.model = model.clone();
+        let config = config;
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
         let codex_op_tx = spawn_agent(config.clone(), app_event_tx.clone(), thread_manager);
 
-        let model_for_header = config
-            .model
+        let model_for_header = model
             .clone()
             .unwrap_or_else(|| DEFAULT_MODEL_DISPLAY_NAME.to_string());
         let active_cell = if model.is_none() {
@@ -1571,7 +1569,7 @@ impl ChatWidget {
         session_configured: codex_core::protocol::SessionConfiguredEvent,
     ) -> Self {
         let ChatWidgetInit {
-            mut config,
+            config,
             frame_requester,
             app_event_tx,
             initial_prompt,
@@ -1584,7 +1582,7 @@ impl ChatWidget {
             ..
         } = common;
         let model = model.filter(|m| !m.trim().is_empty());
-        config.model = model.clone();
+        let config = config;
         let mut rng = rand::rng();
         let placeholder = PLACEHOLDERS[rng.random_range(0..PLACEHOLDERS.len())].to_string();
 
@@ -3772,9 +3770,8 @@ impl ChatWidget {
             .unwrap_or(false)
     }
 
-    /// Set the reasoning effort in the widget's config copy and stored collaboration mode.
+    /// Set the reasoning effort in the stored collaboration mode.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
-        self.config.model_reasoning_effort = effort;
         self.stored_collaboration_mode =
             self.stored_collaboration_mode
                 .with_updates(None, Some(effort), None);
@@ -3790,6 +3787,10 @@ impl ChatWidget {
 
     fn current_model(&self) -> &str {
         self.stored_collaboration_mode.model()
+    }
+
+    pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
+        self.stored_collaboration_mode.reasoning_effort()
     }
 
     fn is_session_configured(&self) -> bool {
