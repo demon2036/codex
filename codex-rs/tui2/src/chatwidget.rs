@@ -347,7 +347,6 @@ pub(crate) struct ChatWidget {
     /// where the overlay may briefly treat new tail content as already cached.
     active_cell_revision: u64,
     config: Config,
-    model: Option<String>,
     /// Stored collaboration mode with model and reasoning effort.
     ///
     /// When collaboration modes feature is enabled, this is initialized to the first preset.
@@ -536,7 +535,6 @@ impl ChatWidget {
         self.current_rollout_path = Some(event.rollout_path.clone());
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
-        self.model = Some(model_for_header.clone());
         self.session_header.set_model(&model_for_header);
         // Update stored collaboration mode with model and reasoning effort from session
         self.stored_collaboration_mode = CollaborationMode::Custom(Settings {
@@ -787,7 +785,7 @@ impl ChatWidget {
 
             if high_usage
                 && !self.rate_limit_switch_prompt_hidden()
-                && self.current_model() != Some(NUDGE_MODEL_SLUG)
+                && self.current_model() != NUDGE_MODEL_SLUG
                 && !matches!(
                     self.rate_limit_switch_prompt,
                     RateLimitSwitchPromptState::Shown
@@ -1508,7 +1506,6 @@ impl ChatWidget {
             active_cell,
             active_cell_revision: 0,
             config,
-            model,
             stored_collaboration_mode,
             auth_manager,
             models_manager,
@@ -1625,7 +1622,6 @@ impl ChatWidget {
             active_cell: None,
             active_cell_revision: 0,
             config,
-            model: Some(header_model.clone()),
             stored_collaboration_mode,
             auth_manager,
             models_manager,
@@ -2100,13 +2096,12 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
-        let Some(model) = self.current_model().or(self.config.model.as_deref()) else {
+        if self.current_model().is_empty() {
             tracing::warn!("cannot submit user message before model is known; queueing");
             self.queued_user_messages.push_front(user_message);
             self.refresh_queued_user_messages();
             return;
-        };
-        let model = model.to_string();
+        }
 
         let UserMessage { text, image_paths } = user_message;
         if text.is_empty() && image_paths.is_empty() {
@@ -2685,7 +2680,7 @@ impl ChatWidget {
         let current_model = self.current_model();
         let current_label = presets
             .iter()
-            .find(|preset| Some(preset.model.as_str()) == current_model)
+            .find(|preset| preset.model.as_str() == current_model)
             .map(|preset| preset.display_name.to_string())
             .unwrap_or_else(|| self.model_display_name().to_string());
 
@@ -2713,7 +2708,7 @@ impl ChatWidget {
                 SelectionItem {
                     name: preset.display_name.clone(),
                     description,
-                    is_current: Some(model.as_str()) == current_model,
+                    is_current: model.as_str() == current_model,
                     is_default: preset.is_default,
                     actions,
                     dismiss_on_select: true,
@@ -2780,7 +2775,7 @@ impl ChatWidget {
         for preset in presets.into_iter() {
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
-            let is_current = Some(preset.model.as_str()) == self.current_model();
+            let is_current = preset.model.as_str() == self.current_model();
             let single_supported_effort = preset.supported_reasoning_efforts.len() == 1;
             let preset_for_action = preset.clone();
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
@@ -2951,7 +2946,7 @@ impl ChatWidget {
             .or(Some(default_effort));
 
         let model_slug = preset.model.to_string();
-        let is_current_model = self.current_model() == Some(preset.model.as_str());
+        let is_current_model = self.current_model() == preset.model.as_str();
         let highlight_choice = if is_current_model {
             self.stored_collaboration_mode.reasoning_effort()
         } else {
@@ -3781,14 +3776,13 @@ impl ChatWidget {
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
         self.session_header.set_model(model);
-        self.model = Some(model.to_string());
         self.stored_collaboration_mode =
             self.stored_collaboration_mode
                 .with_updates(Some(model.to_string()), None, None);
     }
 
-    fn current_model(&self) -> Option<&str> {
-        self.model.as_deref()
+    fn current_model(&self) -> &str {
+        self.stored_collaboration_mode.model()
     }
 
     fn collaboration_modes_enabled(&self) -> bool {
@@ -3796,7 +3790,12 @@ impl ChatWidget {
     }
 
     fn model_display_name(&self) -> &str {
-        self.model.as_deref().unwrap_or(DEFAULT_MODEL_DISPLAY_NAME)
+        let model = self.current_model();
+        if model.is_empty() {
+            DEFAULT_MODEL_DISPLAY_NAME
+        } else {
+            model
+        }
     }
 
     /// Get the label for the current collaboration mode.
