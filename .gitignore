@@ -9,6 +9,7 @@ node_modules
 
 # build
 dist/
+_coder_artifact/
 bazel-*
 build/
 out/
