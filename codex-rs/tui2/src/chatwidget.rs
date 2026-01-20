@@ -3789,6 +3789,7 @@ impl ChatWidget {
         self.stored_collaboration_mode.model()
     }
 
+    #[cfg(test)]
     pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
         self.stored_collaboration_mode.reasoning_effort()
     }
