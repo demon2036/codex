@@ -614,12 +614,16 @@ impl ChatWidget {
         let initial_messages = event.initial_messages.clone();
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
-        // Update stored collaboration mode with model and reasoning effort from session.
-        self.stored_collaboration_mode = CollaborationMode::Custom(Settings {
-            model: model_for_header.clone(),
-            reasoning_effort: event.reasoning_effort,
-            developer_instructions: None,
-        });
+        // Only update stored collaboration settings when collaboration modes are disabled.
+        // When enabled, we preserve the selected variant (Plan/Pair/Execute/Custom) and its
+        // instructions as-is; the session configured event should not override it.
+        if !self.collaboration_modes_enabled() {
+            self.stored_collaboration_mode = self.stored_collaboration_mode.with_updates(
+                Some(model_for_header.clone()),
+                Some(event.reasoning_effort),
+                None,
+            );
+        }
         let session_info_cell = history_cell::new_session_info(
             &self.config,
             &model_for_header,
