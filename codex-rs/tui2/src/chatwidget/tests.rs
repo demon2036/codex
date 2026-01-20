@@ -1356,13 +1356,13 @@ async fn collab_mode_shift_tab_cycles_only_when_enabled_and_idle() {
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
     assert!(matches!(
         chat.stored_collaboration_mode,
-        CollaborationMode::PairProgramming(_)
+        CollaborationMode::Execute(_)
     ));
 
     chat.handle_key_event(KeyEvent::from(KeyCode::BackTab));
     assert!(matches!(
         chat.stored_collaboration_mode,
-        CollaborationMode::Execute(_)
+        CollaborationMode::Plan(_)
     ));
 
     chat.on_task_started();
@@ -1395,25 +1395,29 @@ async fn collab_slash_command_opens_picker_and_updates_mode() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
-            collaboration_mode: Some(CollaborationMode::Plan(_)),
+            collaboration_mode: Some(CollaborationMode::PairProgramming(_)),
             ..
         } => {}
-        other => panic!("expected Op::UserTurn with plan collab mode, got {other:?}"),
+        other => {
+            panic!("expected Op::UserTurn with pair programming collab mode, got {other:?}")
+        }
     }
 
     chat.bottom_pane.set_composer_text("follow up".to_string());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
-            collaboration_mode: Some(CollaborationMode::Plan(_)),
+            collaboration_mode: Some(CollaborationMode::PairProgramming(_)),
             ..
         } => {}
-        other => panic!("expected Op::UserTurn with plan collab mode, got {other:?}"),
+        other => {
+            panic!("expected Op::UserTurn with pair programming collab mode, got {other:?}")
+        }
     }
 }
 
 #[tokio::test]
-async fn collab_mode_defaults_to_first_preset_when_enabled() {
+async fn collab_mode_defaults_to_pair_programming_when_enabled() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
     chat.conversation_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
@@ -1422,10 +1426,12 @@ async fn collab_mode_defaults_to_first_preset_when_enabled() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
-            collaboration_mode: Some(CollaborationMode::Plan(_)),
+            collaboration_mode: Some(CollaborationMode::PairProgramming(_)),
             ..
         } => {}
-        other => panic!("expected Op::UserTurn with plan collab mode, got {other:?}"),
+        other => {
+            panic!("expected Op::UserTurn with pair programming collab mode, got {other:?}")
+        }
     }
 }
 

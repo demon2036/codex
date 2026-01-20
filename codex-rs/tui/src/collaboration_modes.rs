@@ -19,7 +19,12 @@ fn mode_kind(mode: &CollaborationMode) -> ModeKind {
 }
 
 pub(crate) fn default_mode(models_manager: &ModelsManager) -> Option<CollaborationMode> {
-    models_manager.list_collaboration_modes().into_iter().next()
+    let presets = models_manager.list_collaboration_modes();
+    presets
+        .iter()
+        .find(|preset| matches!(preset, CollaborationMode::PairProgramming(_)))
+        .cloned()
+        .or_else(|| presets.into_iter().next())
 }
 
 pub(crate) fn same_variant(a: &CollaborationMode, b: &CollaborationMode) -> bool {
