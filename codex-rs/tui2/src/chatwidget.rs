@@ -2100,7 +2100,7 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
-        if self.current_model().is_empty() {
+        if !self.is_session_configured() {
             tracing::warn!("cannot submit user message before model is known; queueing");
             self.queued_user_messages.push_front(user_message);
             self.refresh_queued_user_messages();
@@ -3790,6 +3790,10 @@ impl ChatWidget {
 
     fn current_model(&self) -> &str {
         self.stored_collaboration_mode.model()
+    }
+
+    fn is_session_configured(&self) -> bool {
+        self.conversation_id.is_some()
     }
 
     fn collaboration_modes_enabled(&self) -> bool {
