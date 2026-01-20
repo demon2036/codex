@@ -1436,6 +1436,16 @@ async fn collab_mode_defaults_to_pair_programming_when_enabled() {
 }
 
 #[tokio::test]
+async fn collab_mode_enabling_sets_pair_programming_default() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.set_feature_enabled(Feature::CollaborationModes, true);
+    assert!(matches!(
+        chat.stored_collaboration_mode,
+        CollaborationMode::PairProgramming(_)
+    ));
+}
+
+#[tokio::test]
 async fn slash_quit_requests_exit() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
 

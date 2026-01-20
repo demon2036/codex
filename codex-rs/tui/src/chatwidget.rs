@@ -3113,9 +3113,8 @@ impl ChatWidget {
                 };
                 let is_current =
                     collaboration_modes::same_variant(&self.stored_collaboration_mode, &preset);
-                let preset_for_action = preset.clone();
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                    tx.send(AppEvent::UpdateCollaborationMode(preset_for_action.clone()));
+                    tx.send(AppEvent::UpdateCollaborationMode(preset.clone()));
                 })];
                 SelectionItem {
                     name: name.to_string(),
@@ -4043,7 +4042,7 @@ impl ChatWidget {
             };
             self.stored_collaboration_mode = if enabled {
                 collaboration_modes::default_mode(self.models_manager.as_ref())
-                    .unwrap_or_else(|| CollaborationMode::Custom(settings))
+                    .unwrap_or(CollaborationMode::Custom(settings))
             } else {
                 CollaborationMode::Custom(settings)
             };
