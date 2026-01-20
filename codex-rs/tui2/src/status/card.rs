@@ -13,6 +13,7 @@ use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TokenUsageInfo;
 use codex_protocol::ThreadId;
 use codex_protocol::account::PlanType;
+use codex_protocol::openai_models::ReasoningEffort;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
 use std::collections::BTreeSet;
@@ -85,6 +86,7 @@ pub(crate) fn new_status_output(
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
+    reasoning_effort_override: Option<Option<ReasoningEffort>>,
 ) -> CompositeHistoryCell {
     let command = PlainHistoryCell::new(vec!["/status".magenta().into()]);
     let card = StatusHistoryCell::new(
@@ -99,6 +101,7 @@ pub(crate) fn new_status_output(
         now,
         model_name,
         collaboration_mode,
+        reasoning_effort_override,
     );
 
     CompositeHistoryCell::new(vec![Box::new(command), Box::new(card)])
@@ -118,8 +121,22 @@ impl StatusHistoryCell {
         now: DateTime<Local>,
         model_name: &str,
         collaboration_mode: Option<&str>,
+        reasoning_effort_override: Option<Option<ReasoningEffort>>,
     ) -> Self {
-        let config_entries = create_config_summary_entries(config, model_name);
+        let mut config_entries = create_config_summary_entries(config, model_name);
+        if let Some(override_effort) = reasoning_effort_override {
+            let override_value = override_effort
+                .map(|effort| effort.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            if let Some((_, value)) = config_entries
+                .iter_mut()
+                .find(|(key, _)| *key == "reasoning effort")
+            {
+                *value = override_value;
+            } else {
+                config_entries.push(("reasoning effort", override_value));
+            }
+        }
         let (model_name, model_details) = compose_model_display(model_name, &config_entries);
         let approval = config_entries
             .iter()

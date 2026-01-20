@@ -2723,6 +2723,9 @@ impl ChatWidget {
             .map(|ti| &ti.total_token_usage)
             .unwrap_or(&default_usage);
         let collaboration_mode = self.collaboration_mode_label();
+        let reasoning_effort_override = self
+            .collaboration_modes_enabled()
+            .then_some(self.stored_collaboration_mode.reasoning_effort());
         self.add_to_history(crate::status::new_status_output(
             &self.config,
             self.auth_manager.as_ref(),
@@ -2735,6 +2738,7 @@ impl ChatWidget {
             Local::now(),
             self.model_display_name(),
             collaboration_mode,
+            reasoning_effort_override,
         ));
     }
 
@@ -4138,25 +4142,7 @@ impl ChatWidget {
             return;
         }
 
-        // Preserve model and reasoning effort when switching modes.
-        let developer_instructions = match &mode {
-            CollaborationMode::Plan(s)
-            | CollaborationMode::PairProgramming(s)
-            | CollaborationMode::Execute(s)
-            | CollaborationMode::Custom(s) => s.developer_instructions.clone(),
-        };
-        let settings = Settings {
-            model: self.stored_collaboration_mode.model().to_string(),
-            reasoning_effort: self.stored_collaboration_mode.reasoning_effort(),
-            developer_instructions,
-        };
-
-        self.stored_collaboration_mode = match mode {
-            CollaborationMode::Plan(_) => CollaborationMode::Plan(settings),
-            CollaborationMode::PairProgramming(_) => CollaborationMode::PairProgramming(settings),
-            CollaborationMode::Execute(_) => CollaborationMode::Execute(settings),
-            CollaborationMode::Custom(_) => CollaborationMode::Custom(settings),
-        };
+        self.stored_collaboration_mode = mode;
 
         let label = self.collaboration_mode_label();
         if let Some(label) = label {
