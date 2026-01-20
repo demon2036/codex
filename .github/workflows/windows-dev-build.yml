@@ -1,0 +1,41 @@
+name: windows-dev-build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: codex-rs
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@1.92
+
+      - name: Cargo build (release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --bin codex --bin codex-windows-sandbox-setup --bin codex-command-runner
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          cp target/release/codex.exe ../dist/coder.exe
+          cp target/release/codex-windows-sandbox-setup.exe ../dist/
+          cp target/release/codex-command-runner.exe ../dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-windows-x86_64-pc-windows-msvc
+          path: |
+            dist/coder.exe
+            dist/codex-windows-sandbox-setup.exe
+            dist/codex-command-runner.exe
