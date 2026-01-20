@@ -399,6 +399,22 @@ async fn make_chatwidget_manual(
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let codex_home = cfg.codex_home.clone();
     let models_manager = Arc::new(ModelsManager::new(codex_home, auth_manager.clone()));
+    let collaboration_modes_enabled = cfg.features.enabled(Feature::CollaborationModes);
+    let stored_collaboration_mode = if collaboration_modes_enabled {
+        collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
+            CollaborationMode::Custom(Settings {
+                model: resolved_model.clone(),
+                reasoning_effort: cfg.model_reasoning_effort,
+                developer_instructions: None,
+            })
+        })
+    } else {
+        CollaborationMode::Custom(Settings {
+            model: resolved_model.clone(),
+            reasoning_effort: cfg.model_reasoning_effort,
+            developer_instructions: None,
+        })
+    };
     let widget = ChatWidget {
         app_event_tx,
         codex_op_tx: op_tx,
@@ -406,21 +422,7 @@ async fn make_chatwidget_manual(
         active_cell: None,
         active_cell_revision: 0,
         config: cfg,
-        stored_collaboration_mode: if cfg.features.enabled(Feature::CollaborationModes) {
-            collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
-                CollaborationMode::Custom(Settings {
-                    model: resolved_model.clone(),
-                    reasoning_effort: cfg.model_reasoning_effort,
-                    developer_instructions: None,
-                })
-            })
-        } else {
-            CollaborationMode::Custom(Settings {
-                model: resolved_model.clone(),
-                reasoning_effort: cfg.model_reasoning_effort,
-                developer_instructions: None,
-            })
-        },
+        stored_collaboration_mode,
         auth_manager,
         models_manager,
         session_header: SessionHeader::new(resolved_model),
