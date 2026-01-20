@@ -12,9 +12,9 @@ jobs:
         working-directory: codex-rs
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@1.92
+      - uses: dtolnay/rust-toolchain@1.92.0
 
       - name: Cargo build (release)
         shell: bash
