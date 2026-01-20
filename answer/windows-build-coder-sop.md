@@ -72,6 +72,10 @@ name: windows-dev-build
 on:
   workflow_dispatch:
 
+concurrency:
+  group: windows-dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build (windows-latest)
@@ -85,11 +89,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.92.0
 
+      # 缓存：第一次跑会慢（20~30min 很常见），但后续改代码重复编译会快很多
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            codex-rs -> target
+
       - name: Cargo build (release)
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --release --bin codex --bin codex-windows-sandbox-setup --bin codex-command-runner
+          cargo build --locked --release --bin codex --bin codex-windows-sandbox-setup --bin codex-command-runner
 
       - name: Collect artifacts
         shell: bash
@@ -259,4 +269,3 @@ Get-FileHash -Algorithm SHA256 "$env:USERPROFILE\.coder\bin\coder.exe"
 现在只是 `codex.exe -> coder.exe` 的重命名；如果你想 help/usage/completion 也都叫 `coder`，需要改 Rust 代码（例如 `codex-rs/cli/src/main.rs` 里 `bin_name = "codex"`、`override_usage = "codex ..."`、以及 `print_completion()` 里 hardcode 的 `"codex"`）。
 
 做这件事会牵连一些测试/文案（比如内部用 `try_parse_from(["codex", ...])`），建议你确认需求后再动；你确定要我把这部分也“魔改”掉的话，我可以给你一套最小改动方案 + 重新跑 Actions 出新 `coder.exe`。
-
