@@ -286,12 +286,12 @@ async fn submission_preserves_text_elements_and_local_images() {
 
     let mut user_input_items = None;
     while let Ok(op) = op_rx.try_recv() {
-        if let Op::UserInput { items, .. } = op {
+        if let Op::UserTurn { items, .. } = op {
             user_input_items = Some(items);
             break;
         }
     }
-    let items = user_input_items.expect("expected Op::UserInput");
+    let items = user_input_items.expect("expected Op::UserTurn");
     assert_eq!(items.len(), 2);
     assert_eq!(
         items[0],
