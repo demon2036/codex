@@ -4294,10 +4294,6 @@ impl ChatWidget {
         self.current_rollout_path.clone()
     }
 
-    fn is_session_configured(&self) -> bool {
-        self.conversation_id.is_some()
-    }
-
     /// Returns a cache key describing the current in-flight active cell for the transcript overlay.
     ///
     /// `Ctrl+T` renders committed transcript cells plus a render-only live tail derived from the

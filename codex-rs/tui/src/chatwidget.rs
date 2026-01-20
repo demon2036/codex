@@ -4567,10 +4567,6 @@ impl ChatWidget {
         self.thread_id
     }
 
-    fn is_session_configured(&self) -> bool {
-        self.thread_id.is_some()
-    }
-
     pub(crate) fn rollout_path(&self) -> Option<PathBuf> {
         self.current_rollout_path.clone()
     }
