@@ -100,8 +100,6 @@ pub enum Feature {
     Collab,
     /// Steer feature flag - when enabled, Enter submits immediately instead of queuing.
     Steer,
-    /// Change Codex's personality
-    Personality,
 }
 
 impl Feature {
@@ -444,12 +442,6 @@ pub const FEATURES: &[FeatureSpec] = &[
             menu_description: "Enter submits immediately; Tab queues messages when a task is running.",
             announcement: "NEW! Try Steer mode: Enter submits immediately, Tab queues. Enable in /experimental!",
         },
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::Personality,
-        key: "personality",
-        stage: Stage::Experimental,
         default_enabled: false,
     },
 ];
