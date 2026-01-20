@@ -349,7 +349,7 @@ async fn helpers_are_available_and_do_not_panic() {
     ));
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
     let init = ChatWidgetInit {
-        config: cfg.clone(),
+        config: cfg,
         frame_requester: FrameRequester::test_dummy(),
         app_event_tx: tx,
         initial_prompt: None,
@@ -405,7 +405,7 @@ async fn make_chatwidget_manual(
         bottom_pane: bottom,
         active_cell: None,
         active_cell_revision: 0,
-        config: cfg.clone(),
+        config: cfg,
         stored_collaboration_mode: if cfg.features.enabled(Feature::CollaborationModes) {
             collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
                 CollaborationMode::Custom(Settings {
@@ -421,7 +421,7 @@ async fn make_chatwidget_manual(
                 developer_instructions: None,
             })
         },
-        auth_manager: auth_manager.clone(),
+        auth_manager,
         models_manager,
         session_header: SessionHeader::new(resolved_model),
         initial_user_message: None,
