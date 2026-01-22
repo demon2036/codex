@@ -248,6 +248,44 @@ if ([string]::IsNullOrEmpty($userPath)) {
 
 > 注意：我们只是把文件名改成 `coder.exe`，但 CLI help 里仍显示 `Usage: codex ...`，这是代码里硬写了 `bin_name = "codex"`，属于“只改 exe 名字”的预期行为。
 
+### 6.1 （可选/推荐）避免 exe 被占用：用 shim 让 `coder` 指向 `coder2.exe`
+
+如果你经常开着 `coder.exe`（TUI 长驻），Windows 会锁定正在运行的 exe，导致你无法覆盖更新。
+
+一个稳定做法是：把 `coder` 变成一个不易被占用的 `coder.cmd`“跳板”，让它去调用 `coder2.exe`（真正的可执行文件）。这样你更新时只需要替换 `coder2.exe` 或切换目标，不需要动正在运行的 `coder.exe`。
+
+1) 把最新编译产物复制成 `coder2.exe`：
+
+```powershell
+$bin = Join-Path $env:USERPROFILE ".coder\\bin"
+Copy-Item -Force .\\_coder_artifact\\coder.exe (Join-Path $bin "coder2.exe")
+```
+
+2) 创建 shim 目录 + `coder.cmd`（并把 shim 放到 PATH 里且位于 `.coder\\bin` 之前）：
+
+```powershell
+$bin = Join-Path $env:USERPROFILE ".coder\\bin"
+$shim = Join-Path $env:USERPROFILE ".coder\\shim"
+New-Item -ItemType Directory -Force $shim | Out-Null
+
+@'
+@echo off
+setlocal
+set "BIN=%USERPROFILE%\.coder\bin"
+"%BIN%\coder2.exe" %*
+'@ | Set-Content -Path (Join-Path $shim "coder.cmd") -Encoding ASCII
+
+$userPath = [Environment]::GetEnvironmentVariable("Path","User")
+$parts = $userPath -split ';' | Where-Object { $_ -and $_ -ne $shim -and $_ -ne $bin }
+[Environment]::SetEnvironmentVariable("Path", ($parts + $shim + $bin) -join ';', "User")
+```
+
+3) 新开一个终端后，`coder` 会走 `coder2.exe`：
+
+```powershell
+coder --version
+```
+
 ---
 
 ## 7. 常见问题排障
