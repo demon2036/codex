@@ -202,7 +202,27 @@ gh run download <RUN_ID> -R "$me/codex" -n codex-windows-x86_64-pc-windows-msvc 
 ```powershell
 $bin = Join-Path $env:USERPROFILE ".coder\\bin"
 New-Item -ItemType Directory -Force $bin | Out-Null
-Copy-Item -Force .\_coder_artifact\*.exe $bin
+
+# 先更新配套 exe（通常不会被占用）
+Copy-Item -Force .\_coder_artifact\codex-command-runner.exe $bin
+Copy-Item -Force .\_coder_artifact\codex-windows-sandbox-setup.exe $bin
+
+# 再更新主程序（如果正在运行 coder.exe，这一步会报 “being used by another process”）
+Copy-Item -Force .\_coder_artifact\coder.exe (Join-Path $bin "coder.exe")
+```
+
+如果你看到 “because it is being used by another process”，说明你有 `coder.exe` 还在运行。两种做法：
+
+1) 退出所有 `coder.exe` 后重跑上面那行覆盖
+2) 先并排放一个新版本（不用停旧进程也能立即用），等方便的时候再切换：
+
+```powershell
+$runId = <RUN_ID>
+Copy-Item -Force .\_coder_artifact\coder.exe (Join-Path $bin "coder-$runId.exe")
+& (Join-Path $bin "coder-$runId.exe") --help
+
+# 退出所有 coder 后切换成正式名字
+Move-Item -Force (Join-Path $bin "coder-$runId.exe") (Join-Path $bin "coder.exe")
 ```
 
 把这个目录加入 **用户 PATH**（写 User 环境变量，不需要管理员；新开一个终端才生效）：
