@@ -775,6 +775,10 @@ pub struct ConfigToml {
     #[serde(default)]
     pub developer_instructions: Option<String>,
 
+    /// Optional path to a file containing developer instructions inserted as a `developer` role
+    /// message. If `developer_instructions` is set, it takes precedence.
+    pub developer_instructions_file: Option<AbsolutePathBuf>,
+
     /// Optional path to a file containing model instructions that will override
     /// the built-in instructions for the selected model. Users are STRONGLY
     /// DISCOURAGED from using this field, as deviating from the instructions
@@ -1434,7 +1438,19 @@ impl Config {
         let file_base_instructions =
             Self::try_read_non_empty_file(model_instructions_path, "model instructions file")?;
         let base_instructions = base_instructions.or(file_base_instructions);
-        let developer_instructions = developer_instructions.or(cfg.developer_instructions);
+
+        let developer_instructions = developer_instructions
+            .or(config_profile.developer_instructions)
+            .or(cfg.developer_instructions);
+        let developer_instructions_path = config_profile
+            .developer_instructions_file
+            .as_ref()
+            .or(cfg.developer_instructions_file.as_ref());
+        let file_developer_instructions = Self::try_read_non_empty_file(
+            developer_instructions_path,
+            "developer instructions file",
+        )?;
+        let developer_instructions = developer_instructions.or(file_developer_instructions);
         let model_personality = model_personality
             .or(config_profile.model_personality)
             .or(cfg.model_personality);
