@@ -36,6 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../dist
+          cp target/release/codex.exe ../dist/coder2.exe
           cp target/release/codex.exe ../dist/coder.exe
           cp target/release/codex-windows-sandbox-setup.exe ../dist/
           cp target/release/codex-command-runner.exe ../dist/
@@ -45,6 +46,7 @@ jobs:
         with:
           name: codex-windows-x86_64-pc-windows-msvc
           path: |
+            dist/coder2.exe
             dist/coder.exe
             dist/codex-windows-sandbox-setup.exe
             dist/codex-command-runner.exe
