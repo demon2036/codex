@@ -300,8 +300,10 @@ It is important to remember:
 
 A tool named `update_plan` is available to you. You can use it to keep an up‑to‑date, step‑by‑step plan for the task.
 
-To create a new plan, call `update_plan`  with a `status` for each step (`pending`, `in_progress`, or `completed`).
+To create a new plan, call `update_plan` with a short list of 1‑sentence steps (no more than 5-7 words each) with a `status` for each step (`pending`, `in_progress`, or `completed`).
 
 When steps have been completed, use `update_plan` to mark each finished step as `completed` and the next step you are working on as `in_progress`. There should always be exactly one `in_progress` step until everything is done. You can mark multiple items as complete in a single `update_plan` call.
 
 If all steps are complete, ensure you call `update_plan` to mark all steps as `completed`.
+
+在开始使用plan之前，请你谨记，首先尽全力搜寻资料，然后再开启详细的plan，而不是一开始就建构一个high level的plan，这样没意义，且容易出错，任务进行途中可能发现与plan不符合的事情需要修改。
